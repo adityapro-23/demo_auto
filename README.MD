@@ -28,6 +28,60 @@ The project employs a specialized **Multi-Agent Orchestration** pattern to ensur
 
 ---
 
+### High-Level Architecture Diagram
+
+```mermaid
+graph TD
+    %% Frontend
+    subgraph Frontend [React Dashboard - Vite + Tailwind]
+        UI[User Interface]
+        Store[Zustand State Store]
+        Poller[Live Results Poller]
+    end
+
+    %% Backend API
+    subgraph Backend [Node.js Express API]
+        Controller[API Controller]
+    end
+
+    %% Multi-Agent System
+    subgraph MAS [Multi-Agent System]
+        Auditor[Agent 1: The Auditor]
+        Orchestrator[Agent 2: The Orchestrator]
+        Solver[Agent 3: The Solver]
+    end
+
+    %% Execution Sandbox
+    subgraph Sandbox [Isolated Execution]
+        Docker[(Docker Daemon)]
+        Engines[Language Engines: Node, Python, Java, Go, Ruby]
+    end
+
+    %% External
+    GitHub[(GitHub Repository)]
+    LLM((OpenAI GPT-4 Turbo))
+
+    %% Connections
+    UI -->|"repoUrl, teamName"| Controller
+    Poller -->|"GET /api/results"| Controller
+    Controller --> Orchestrator
+    
+    Orchestrator --> Auditor
+    Auditor -->|"Git Clone / Branch"| GitHub
+    
+    Orchestrator -->|"Detect & Run Tests"| Engines
+    Engines -->|"Spawn Container"| Docker
+    Docker -->|"Test Logs"| Orchestrator
+    
+    Orchestrator -->|"Analyze Logs"| LLM
+    Orchestrator -->|"Pass OPEN Issues"| Solver
+    
+    Solver -->|"Generate Fixes"| LLM
+    Solver -->|"Overwrite File"| Auditor
+    
+    Orchestrator -->|"Commit & Push [AI-AGENT]"| GitHub
+```
+
 ## 🚀 Key Features
 
 * **Polyglot Support**: Native engines for **Node.js, Python, Java, Go, and Ruby**.
