@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: rift_agent_backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Critical for spawning sibling containers
+      - ./backend/results.json:/app/results.json # Persist results if needed
+      - ./temp:/app/temp # Persist cloned repos if needed for debugging
+    environment:
+      - PORT=3000
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    networks:
+      - rift_network
+
+networks:
+  rift_network:
+    driver: bridge
