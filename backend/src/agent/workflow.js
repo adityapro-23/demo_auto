@@ -24,11 +24,25 @@ async function cloneAndSetup(state) {
 
     try {
         console.log(`Cloning ${repoUrl} to ${localPath}...`);
-        await git.clone(repoUrl, localPath);
+
+        // Inject token for authentication
+        // NOTE: The user must have GITHUB_TOKEN in .env
+        const token = process.env.GITHUB_TOKEN;
+        let authUrl = repoUrl;
+
+        if (token && repoUrl.startsWith('https://')) {
+            authUrl = repoUrl.replace('https://', `https://${token}@`);
+        }
+
+        await git.clone(authUrl, localPath);
 
         const repoGit = simpleGit(localPath);
         console.log(`Checking out branch ${branchName}...`);
         await repoGit.checkoutLocalBranch(branchName);
+
+        // Configure git user for the container
+        await repoGit.addConfig('user.name', 'VicRaptors AI Agent');
+        await repoGit.addConfig('user.email', 'agent@vicraptors.com');
 
         return {
             localPath,
@@ -49,19 +63,25 @@ async function runTests(state) {
     const { localPath, iteration } = state;
     console.log(`Running tests (Iteration ${iteration})...`);
 
-    // Auto-discover test command? For now, assume npm test or discover package.json
-    // Ideally we inspect package.json scripts.
-    let testCmd = 'npm test';
-    if (fs.existsSync(path.join(localPath, 'package.json'))) {
+    // Auto-discover test command & image
+    let testCmd = 'npm install && npm test';
+    let imageName = 'node:18-alpine';
+
+    if (fs.existsSync(path.join(localPath, 'requirements.txt'))) {
+        console.log('Detected Python project');
+        imageName = 'python:3.9-alpine';
+        testCmd = 'pip install -r requirements.txt && pytest';
+    } else if (fs.existsSync(path.join(localPath, 'package.json'))) {
         const pkg = JSON.parse(fs.readFileSync(path.join(localPath, 'package.json'), 'utf8'));
         if (pkg.scripts && pkg.scripts.test) {
-            testCmd = 'npm test';
-        } else {
-            // Fallback logic could be added here
+            testCmd = 'npm install && npm test';
         }
     }
 
-    const result = await runTestsInSandbox(localPath, testCmd);
+    const result = await runTestsInSandbox(localPath, testCmd, imageName);
+
+    // ADD THIS LINE TO REVEAL THE HIDDEN ERROR:
+    console.log(`\n--- TEST OUTPUT (Iter ${iteration}) ---\n`, result.output, `\n-----------------------------------\n`);
 
     return {
         testOutput: result.output,
@@ -142,6 +162,16 @@ async function applyFixes(state) {
         const repoGit = simpleGit(localPath);
         await repoGit.add(bug.file);
         await repoGit.commit(`[AI-AGENT] Fixed ${bug.type} in ${bug.file}`);
+
+        // PUSH TO REMOTE REPOSITORY
+        try {
+            console.log(`Pushing branch ${state.branchName} to remote...`);
+            // We need to set upstream on the first push, and FORCE push to overwrite if branch exists
+            await repoGit.push(['-u', 'origin', state.branchName, '--force']);
+            fixesApplied.push({ ...fixesApplied[fixesApplied.length - 1], pushed: true });
+        } catch (pushError) {
+            console.error(`Failed to push branch ${state.branchName}:`, pushError);
+        }
 
         fixesApplied.push({
             file: bug.file,
