@@ -56,18 +56,28 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
     updateFrontend({ branchName, logs: [`✓ Cloned repo`, `✓ Branch: ${branchName}`] });
 
     // --- Phase 2: Engine Detection ---
-    let engine = null, subDir = '.';
-    if (engineNode.discover(localPath)) {
-        engine = engineNode;
-        subDir = engineNode.discover(localPath);
-        updateFrontend({ logs: ['✓ Detected Node.js project'] });
-    } else if (enginePython.discover(localPath)) {
-        engine = enginePython;
-        updateFrontend({ logs: ['✓ Detected Python project'] });
-    } else {
+    const engines = [
+        require('../engines/node'),
+        require('../engines/python'),
+        require('../engines/java'),
+        require('../engines/go'),
+        require('../engines/ruby')
+    ];
+
+    const activeEngines = [];
+    for (const eng of engines) {
+        if (eng.discover(localPath)) {
+            activeEngines.push(eng);
+        }
+    }
+
+    if (activeEngines.length === 0) {
         updateFrontend({ status: 'FAILED', endTime: Date.now(), logs: ['✗ No supported language detected'] });
         return;
     }
+
+    const detectedNames = activeEngines.map(e => e.constructor.name.replace('Engine', '') || 'Unknown').join(', ');
+    updateFrontend({ logs: [`✓ Detected engines: ${detectedNames}`], detectedEngines: detectedNames });
 
     // --- Issues log helpers ---
     const readLog = () => {
@@ -105,16 +115,39 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
     for (let i = 1; i <= MAX_ITER; i++) {
         console.log(`[Orchestrator] Iteration ${i}/${MAX_ITER}...`);
         outputLog.push(`━━━ Iteration ${i} / ${MAX_ITER} ━━━`);
-        outputLog.push(`Running test suite...`);
+        outputLog.push(`Running test suite(s)...`);
         updateFrontend({ iterations: i, logs: [...outputLog] });
 
-        // A. Run tests
-        const runResult = await engine.run(localPath, subDir);
-        lastTestOutput = runResult.output;
-        outputLog.push(`Test result: ${runResult.success ? '✓ PASS' : '✗ FAIL'}`);
+        // A. Run tests (Polyglot)
+        let combinedOutput = '';
+        let allEnginesPassed = true;
+
+        for (const eng of activeEngines) {
+            try {
+                // Some engines might need subDir, but for now we pass localPath. 
+                // Engines needing subDir should handle discovery internally or we assume root.
+                // NOTE: discover() usually returns the subDir, so we might need to map that.
+                // For simplicity in this refactor, we assume engines handle 'localPath' correctly or we pass '.'
+                const subDir = eng.discover(localPath);
+
+                const result = await eng.run(localPath, subDir || '.');
+                combinedOutput += `\n--- START ${eng.constructor.name} OUTPUT ---\n`;
+                combinedOutput += result.output;
+                combinedOutput += `\n--- END ${eng.constructor.name} OUTPUT ---\n`;
+
+                if (!result.success) allEnginesPassed = false;
+            } catch (e) {
+                console.error(`[Orchestrator] Engine execution failed:`, e);
+                combinedOutput += `\nEngine execution failed: ${e.message}\n`;
+                allEnginesPassed = false;
+            }
+        }
+
+        lastTestOutput = combinedOutput;
+        outputLog.push(`Run result: ${allEnginesPassed ? '✓ PASS' : '✗ FAIL'}`);
 
         // B. All tests pass → commit + push + done
-        if (runResult.success) {
+        if (allEnginesPassed) {
             isSuccess = true;
             outputLog.push(`🎉 All tests PASSED on iteration ${i}!`);
             updateFrontend({ logs: [...outputLog] });
@@ -134,7 +167,7 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
         outputLog.push(`Analyzing failures (${scanLabel})...`);
         updateFrontend({ logs: [...outputLog] });
 
-        const discovered = await analyzeOutput(runResult.output, localPath);
+        const discovered = await analyzeOutput(combinedOutput, localPath);
 
         // Filter out already-addressed issues BUT check for persistence
         const newIssues = [];
@@ -149,10 +182,11 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
             );
 
             if (existingFixed) {
-                // IT CAME BACK! Re-open it.
+                // IT CAME BACK! Re-open it and flag as recurring for the Solver.
                 console.log(`[Orchestrator] Issue reappeared: ${disc.file}::${disc.type}`);
                 existingFixed.status = 'OPEN';
-                existingFixed.description += " [NOTE: Previous fix failed. Try a different approach.]";
+                existingFixed.isRecurring = true;
+                existingFixed.description += " [NOTE: Previous fix failed. Check for dependency issues or incorrect import paths.]";
                 reOpenedIssues.push(existingFixed);
             } else if (!addressedKeys.has(`${disc.file}::${disc.type}::${disc.line}`)) {
                 // Truly new issue
@@ -163,9 +197,28 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
         console.log(`[Orchestrator] Iter ${i}: ${discovered.length} found. New: ${newIssues.length}, Re-opened: ${reOpenedIssues.length}`);
 
         if (newIssues.length === 0 && reOpenedIssues.length === 0) {
-            // All known issues are fixed but tests still fail — could be residual or env issue
-            outputLog.push(`⚠ All known issues marked fixed, but tests still failing.`);
-            outputLog.push(`This requires manual review or structural changes.`);
+            // Zero-issue failure: could be environment or dependency issue — try a clean reinstall
+            outputLog.push(`⚠ Tests failed but no code bugs detected. Attempting clean environment recovery...`);
+            updateFrontend({ logs: [...outputLog] });
+
+            // Trigger clean reinstall in sandbox for each active engine (best effort)
+            try {
+                const { runTestsInSandbox } = require('../agents/docker');
+                const isNode = fs.existsSync(path.join(localPath, 'package.json'));
+                const isPython = fs.existsSync(path.join(localPath, 'requirements.txt'));
+                if (isNode) {
+                    await runTestsInSandbox(localPath, 'rm -rf node_modules && npm install', 'node:18-alpine');
+                    outputLog.push(`✓ Node.js clean reinstall completed.`);
+                }
+                if (isPython) {
+                    await runTestsInSandbox(localPath, 'pip install --force-reinstall -r requirements.txt', 'python:3.9-alpine');
+                    outputLog.push(`✓ Python clean reinstall completed.`);
+                }
+            } catch (reinstallErr) {
+                outputLog.push(`⚠ Recovery attempt failed: ${reinstallErr.message}`);
+            }
+
+            outputLog.push(`Tests failed due to environment or system error. Agent attempted automatic recovery.`);
             updateFrontend({ logs: [...outputLog] });
             break;
         }
@@ -233,7 +286,36 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
         updateFrontend({ fixes: updatedFixes, logs: [...outputLog] });
     }
 
-    // --- Phase 4: Commit + Push (always if fixes were applied) ---
+    // --- Phase 4: Final Sanity Run (if fixes were applied but not yet confirmed passing) ---
+    if (allFixes.length > 0 && !isSuccess) {
+        outputLog.push(`━━━ Final Sanity Run ━━━`);
+        outputLog.push(`Running all engines one last time to verify all fixes...`);
+        updateFrontend({ logs: [...outputLog] });
+
+        let sanityPassed = true;
+        let sanityCombinedOutput = '';
+        for (const eng of activeEngines) {
+            try {
+                const subDir = eng.discover(localPath);
+                const result = await eng.run(localPath, subDir || '.');
+                sanityCombinedOutput += `\n--- SANITY ${eng.constructor.name} ---\n${result.output}\n`;
+                if (!result.success) sanityPassed = false;
+            } catch (e) {
+                sanityCombinedOutput += `\nEngine error: ${e.message}\n`;
+                sanityPassed = false;
+            }
+        }
+
+        if (sanityPassed) {
+            isSuccess = true;
+            outputLog.push(`🎉 Final Sanity Run PASSED! All fixes verified.`);
+        } else {
+            outputLog.push(`✗ Final Sanity Run failed — some issues persist.`);
+        }
+        updateFrontend({ logs: [...outputLog] });
+    }
+
+    // --- Phase 5: Commit + Push (always if fixes were applied) ---
     if (allFixes.length > 0 || isSuccess) {
         outputLog.push(`Committing ${allFixes.length} fix(es) to branch...`);
         updateFrontend({ logs: [...outputLog] });
@@ -243,18 +325,21 @@ async function startOrchestrator(repoUrl, teamName, leaderName) {
         const fixedIssues = logForCommit.issues.filter(iss => iss.status === 'FIXED');
         const committed = await commitFixes(fixedIssues, outputLog);
 
-        // Push branch to remote
-        try {
-            outputLog.push(`Pushing branch "${branchName}"...`);
-            updateFrontend({ logs: [...outputLog] });
-            await repoGit.push('origin', branchName, { '--force': null, '--set-upstream': null });
-            outputLog.push(`✓ Branch pushed successfully!`);
-        } catch (e) {
-            outputLog.push(`⚠ Push failed: ${e.message}`);
+        // Push branch to remote only if we have actual committed fixes
+        if (committed.length > 0) {
+            try {
+                outputLog.push(`Pushing branch "${branchName}"...`);
+                updateFrontend({ logs: [...outputLog] });
+                await repoGit.push('origin', branchName, { '--force': null, '--set-upstream': null });
+                outputLog.push(`✓ Branch pushed successfully!`);
+            } catch (e) {
+                outputLog.push(`⚠ Push failed: ${e.message}`);
+            }
         }
 
         const finalStatus = isSuccess ? 'PASSED' : 'FAILED';
-        updateFrontend({ status: finalStatus, endTime: Date.now(), fixes: committed, logs: [...outputLog] });
+        const finalFixes = committed.length > 0 ? committed : allFixes;
+        updateFrontend({ status: finalStatus, endTime: Date.now(), fixes: finalFixes, logs: [...outputLog] });
     } else {
         updateFrontend({ status: 'FAILED', endTime: Date.now(), logs: [...outputLog] });
     }

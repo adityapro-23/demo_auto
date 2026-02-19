@@ -18,6 +18,7 @@ const useRunStore = create((set) => ({
     filesScanned: 0,
     startTime: null,
     endTime: null,
+    detectedEngines: null,
 
     // Actions
     setFormDetails: (details) => set((state) => ({ ...state, ...details })),
@@ -28,7 +29,8 @@ const useRunStore = create((set) => ({
         startTime: Date.now(),
         iterations: 0,
         filesScanned: 0,
-        fixes: []
+        fixes: [],
+        detectedEngines: null
     }),
 
     addLog: (log) => set((state) => ({ logs: [...state.logs, log] })),
@@ -56,7 +58,8 @@ const useRunStore = create((set) => ({
         iterations: 0,
         filesScanned: 0,
         startTime: null,
-        endTime: null
+        endTime: null,
+        detectedEngines: null
     })
 }));
 

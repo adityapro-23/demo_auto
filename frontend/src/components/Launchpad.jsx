@@ -53,7 +53,7 @@ const Launchpad = () => {
 
             <div className="relative z-10 flex flex-col min-h-screen">
                 {/* Top Navigation */}
-                <header className="flex items-center justify-between px-6 py-4 md:px-12 border-b border-border-dark bg-background-dark/80 backdrop-blur-md">
+                <header className="flex items-center px-6 py-4 md:px-12 border-b border-border-dark bg-background-dark/80 backdrop-blur-md">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-primary rounded-lg text-white">
                             <Activity className="w-6 h-6" />
@@ -61,18 +61,6 @@ const Launchpad = () => {
                         <h2 className="text-xl font-bold tracking-tight text-white">
                             AutoHeal <span className="text-primary">Agent</span>
                         </h2>
-                    </div>
-                    <nav className="hidden md:flex items-center gap-8">
-                        <a className="text-sm font-medium hover:text-primary transition-colors cursor-pointer text-text-muted-dark">Dashboard</a>
-                        <a className="text-sm font-medium hover:text-primary transition-colors cursor-pointer text-text-muted-dark">Docs</a>
-                        <a className="text-sm font-medium hover:text-primary transition-colors cursor-pointer text-text-muted-dark">Pricing</a>
-                        <a className="text-sm font-medium hover:text-primary transition-colors cursor-pointer text-text-muted-dark">Community</a>
-                    </nav>
-                    <div className="flex items-center gap-4">
-                        <button className="text-sm font-medium hover:text-primary transition-colors hidden sm:block text-text-muted-dark">Sign In</button>
-                        <button className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
-                            Get Started
-                        </button>
                     </div>
                 </header>
 
@@ -181,32 +169,6 @@ const Launchpad = () => {
                     </div>
                 </main>
 
-                {/* Features Grid Footer Preview */}
-                <section className="px-6 md:px-12 py-12 md:py-24 bg-slate-900/50 border-t border-border-dark backdrop-blur-sm">
-                    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-                        <div className="p-6 space-y-4 rounded-2xl bg-slate-800/30 border border-border-dark">
-                            <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center text-primary">
-                                <Activity className="w-6 h-6" />
-                            </div>
-                            <h4 className="text-xl font-bold">Deep Log Analysis</h4>
-                            <p className="text-text-muted-dark text-sm leading-relaxed">AI parses through thousands of lines of logs to pinpoint the exact failure vector in milliseconds.</p>
-                        </div>
-                        <div className="p-6 space-y-4 rounded-2xl bg-slate-800/30 border border-border-dark">
-                            <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-500">
-                                <Terminal className="w-6 h-6" />
-                            </div>
-                            <h4 className="text-xl font-bold">Autonomous Patching</h4>
-                            <p className="text-text-muted-dark text-sm leading-relaxed">Our agent suggests and applies code fixes directly to a staging branch for your review.</p>
-                        </div>
-                        <div className="p-6 space-y-4 rounded-2xl bg-slate-800/30 border border-border-dark">
-                            <div className="w-12 h-12 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-500">
-                                <Shield className="w-6 h-6" />
-                            </div>
-                            <h4 className="text-xl font-bold">Zero-Downtime Guarantee</h4>
-                            <p className="text-text-muted-dark text-sm leading-relaxed">Prevent broken deployments before they reach production with predictive failure analysis.</p>
-                        </div>
-                    </div>
-                </section>
 
                 {/* Footer */}
                 <footer className="px-6 md:px-12 py-8 border-t border-border-dark flex flex-col md:flex-row justify-between items-center gap-6">

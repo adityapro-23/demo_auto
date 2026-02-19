@@ -6,7 +6,7 @@ const { HumanMessage } = require('@langchain/core/messages');
 /**
  * Agent Three: The Solver
  * Fixes OPEN issues using full file content + test failure context.
- * Marks each issue FIXED (or FAILED_*) in issues_log.json immediately after.
+ * Supports recurring issue detection, dependency file patching, and multi-file output.
  */
 async function runSolver(localPath, openIssues, issuesLogPath, testOutput = '') {
     console.log('[Solver] Starting repairs...');
@@ -30,7 +30,7 @@ async function runSolver(localPath, openIssues, issuesLogPath, testOutput = '') 
         }
     };
 
-    // Relevnt test output snippet for context
+    // Relevant test output snippet for context
     const testSnippet = testOutput ? testOutput.substring(0, 3000) : '';
 
     for (const issue of openIssues) {
@@ -46,6 +46,17 @@ async function runSolver(localPath, openIssues, issuesLogPath, testOutput = '') 
 
             const fileContent = fs.readFileSync(filePath, 'utf8');
 
+            // Read dependency files for context if applicable
+            let depContext = '';
+            const pkgPath = path.join(localPath, 'package.json');
+            const reqPath = path.join(localPath, 'requirements.txt');
+            if (fs.existsSync(pkgPath)) depContext += `\npackage.json:\n${fs.readFileSync(pkgPath, 'utf8').substring(0, 2000)}`;
+            if (fs.existsSync(reqPath)) depContext += `\nrequirements.txt:\n${fs.readFileSync(reqPath, 'utf8').substring(0, 1000)}`;
+
+            const recurringNote = issue.isRecurring
+                ? `\n⚠ RECURRING BUG: A previous fix attempt did not resolve this. PLEASE:\n  1. Check if the issue is a missing dependency in package.json or requirements.txt.\n  2. Verify that the import path is correct relative to the repo root.\n  3. If a dependency is missing, respond with JSON: { "fixedFile": "...", "fixedContent": "...", "depFile": "package.json OR requirements.txt", "depContent": "...full corrected dep file..." }\n  Otherwise, respond with just the corrected file content as plain text.`
+                : '';
+
             const prompt = `
 You are an expert software engineer. Fix the specific bug in the source file described below.
 
@@ -54,6 +65,7 @@ Bug Details:
 - Type: ${issue.type}
 - Line: ${issue.line || 'unknown'}
 - Description: ${issue.description}
+${recurringNote}
 
 Failing Test Output (for context only — do NOT edit test files):
 \`\`\`
@@ -64,6 +76,7 @@ Current content of "${issue.file}":
 \`\`\`
 ${fileContent}
 \`\`\`
+${depContext ? `\nDependency Files (modify ONLY if a dependency is truly missing):\n${depContext}` : ''}
 
 Instructions:
 1. Fix ONLY the specific bug described above. Do NOT change any other logic.
@@ -71,22 +84,44 @@ Instructions:
 3. If this is a ModuleNotFoundError or Import Error:
     - You MAY create/add a missing __init__.py file if needed (return its content).
     - You MAY correct relative imports.
-4. Return the COMPLETE corrected content of "${issue.file}" — nothing else.
-5. No explanation, no markdown fences, just the raw corrected code.
+4. If this is a RECURRING issue and the root cause is a missing package, respond with JSON (see above).
+5. Otherwise: return the COMPLETE corrected content of "${issue.file}" — nothing else.
+6. No explanation, no markdown fences unless responding with JSON, just the raw corrected code.
 `;
 
             const response = await model.invoke([new HumanMessage(prompt)]);
             let fixedContent = response.content;
 
-            // Strip markdown fences
-            if (fixedContent.includes('```')) {
-                fixedContent = fixedContent
-                    .replace(/^```[\w]*\n?/gm, '')
-                    .replace(/```$/gm, '')
-                    .trim();
-            }
+            // Check if LLM responded with a multi-file JSON (for recurring dep issues)
+            let parsedMulti = null;
+            try {
+                const stripped = fixedContent.replace(/^```json\n?/gm, '').replace(/```$/gm, '').trim();
+                const maybeJson = JSON.parse(stripped);
+                if (maybeJson.fixedFile && maybeJson.fixedContent) parsedMulti = maybeJson;
+            } catch (_) { /* not JSON, treat as plain code */ }
 
-            fs.writeFileSync(filePath, fixedContent);
+            if (parsedMulti) {
+                // Write fixed source file
+                const targetPath = path.join(localPath, parsedMulti.fixedFile);
+                fs.writeFileSync(targetPath, parsedMulti.fixedContent);
+                console.log(`[Solver] Wrote fixed ${parsedMulti.fixedFile}`);
+
+                // Write dependency file if provided
+                if (parsedMulti.depFile && parsedMulti.depContent) {
+                    const depFilePath = path.join(localPath, parsedMulti.depFile);
+                    fs.writeFileSync(depFilePath, parsedMulti.depContent);
+                    console.log(`[Solver] Updated dep file: ${parsedMulti.depFile}`);
+                }
+            } else {
+                // Strip markdown fences if present
+                if (fixedContent.includes('```')) {
+                    fixedContent = fixedContent
+                        .replace(/^```[\w]*\n?/gm, '')
+                        .replace(/```$/gm, '')
+                        .trim();
+                }
+                fs.writeFileSync(filePath, fixedContent);
+            }
 
             // Mark fixed in issues_log immediately
             updateIssueStatus(issue.file, issue.type, issue.line, 'FIXED');

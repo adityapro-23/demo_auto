@@ -4,16 +4,20 @@ import useRunStore from '../store/runStore';
 import {
     FileText, Terminal, ArrowLeft, Shield, Zap,
     Settings, Search, Plus, User, BarChart2, Play,
-    Check, RefreshCcw, DownloadCloud, Activity
+    Check, RefreshCcw, DownloadCloud, Activity,
+    Code, GitBranch, Clock
 } from 'lucide-react';
+import axios from 'axios';
 
 const ResultsDashboard = () => {
     const navigate = useNavigate();
     const {
         repoUrl, teamName, leaderName, branchName, status, logs, fixes,
-        iterations, filesScanned, startTime, endTime,
-        updateFromBackend
+        iterations, filesScanned, startTime, endTime, detectedEngines,
+        updateFromBackend, startRun
     } = useRunStore();
+
+    const [isReRunning, setIsReRunning] = useState(false);
 
     // Mock polling strictly for demo if no backend connection
     useEffect(() => {
@@ -32,12 +36,39 @@ const ResultsDashboard = () => {
         return () => clearInterval(interval);
     }, [updateFromBackend]);
 
-    const calculateScore = () => {
-        let base = 80; // Matching Stitch base
-        const speedBonus = (startTime && (Date.now() - startTime) / 1000 < 60) ? 15 : 0;
-        const penalty = 0; // Simplified for demo
-        return { total: base + speedBonus - penalty, base, bonus: speedBonus, penalty };
+    const handleReRun = async () => {
+        if (!repoUrl || !teamName || !leaderName) return;
+        setIsReRunning(true);
+        startRun();
+        try {
+            const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            await axios.post(`${backendUrl}/api/run-agent`, { repoUrl, teamName, leaderName });
+        } catch (err) {
+            console.warn('Re-run request failed, backend may be busy.', err);
+        } finally {
+            setIsReRunning(false);
+        }
     };
+
+    const calculateScore = () => {
+        const totalIssues = fixes.length;
+        const totalFixed = fixes.filter(f => f.status === 'FIXED' || f.status === 'APPLIED').length;
+        const fixRatio = totalIssues > 0 ? totalFixed / totalIssues : 0;
+
+        const base = 100;
+        const speedBonus = (startTime && (Date.now() - startTime) / 1000 < 120) ? 10 : 0;
+        const fixPoints = Math.round(fixRatio * 30);          // up to +30 for fixes
+        const successBonus = status === 'PASSED' ? 20 : 0;   // +20 for full pass
+        const penalty = totalIssues > 5 ? 10 : 0;            // -10 for many issues
+
+        const total = Math.min(base + speedBonus + fixPoints + successBonus - penalty, 200);
+        return { total, base, bonus: speedBonus + fixPoints + successBonus, penalty };
+    };
+
+    // Determine effective status for display
+    const effectiveStatus = (status === 'FAILED' && fixes.length > 0)
+        ? 'PARTIAL'
+        : status;
 
     const scoreData = calculateScore();
 
@@ -45,39 +76,21 @@ const ResultsDashboard = () => {
         <div className="min-h-screen bg-background-dark text-text-dark font-display">
             {/* Top Navigation */}
             <nav className="bg-card-dark border-b border-border-dark px-6 py-3 flex items-center justify-between sticky top-0 z-50">
-                <div className="flex items-center space-x-8">
-                    <div className="flex items-center space-x-2">
-                        <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white">
-                            <Activity className="w-5 h-5 text-white" />
-                        </div>
-                        <span className="text-xl font-bold tracking-tight text-white">
-                            DevAI <span className="text-primary">SaaS</span>
-                        </span>
+                <div className="flex items-center space-x-2">
+                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white">
+                        <Activity className="w-5 h-5 text-white" />
                     </div>
-                    <div className="hidden md:flex space-x-6 text-sm font-medium text-text-muted-dark">
-                        <a className="hover:text-primary transition-colors cursor-pointer">Projects</a>
-                        <a className="hover:text-primary transition-colors cursor-pointer">Deployments</a>
-                        <a className="hover:text-primary transition-colors cursor-pointer font-bold text-text-dark">Overview</a>
-                        <a className="hover:text-primary transition-colors cursor-pointer">Settings</a>
-                    </div>
+                    <span className="text-xl font-bold tracking-tight text-white">
+                        AutoHeal <span className="text-primary">Agent</span>
+                    </span>
                 </div>
-                <div className="flex items-center space-x-4">
-                    <div className="relative hidden sm:block">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted-dark" />
-                        <input
-                            className="bg-slate-800 border-none text-sm rounded-lg pl-10 pr-4 py-2 w-64 focus:ring-2 focus:ring-primary text-white placeholder-slate-500"
-                            placeholder="Search operations..."
-                            type="text"
-                        />
-                    </div>
-                    <button className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center transition-colors shadow-lg shadow-blue-500/20">
-                        <Plus className="w-4 h-4 mr-1" />
-                        New Agent
-                    </button>
-                    <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 cursor-pointer hover:bg-slate-700 transition-colors">
-                        <User className="w-5 h-5" />
-                    </div>
-                </div>
+                <button
+                    onClick={() => navigate('/')}
+                    className="text-sm font-medium text-text-muted-dark hover:text-primary transition-colors flex items-center gap-1.5"
+                >
+                    <ArrowLeft className="w-4 h-4" />
+                    Home
+                </button>
             </nav>
 
             <main className="max-w-[1600px] mx-auto p-6 md:p-8">
@@ -127,9 +140,16 @@ const ResultsDashboard = () => {
                                         </div>
                                     </div>
                                 </div>
-                                <button className="w-full bg-primary hover:bg-blue-600 text-white py-3 rounded-lg font-semibold text-sm flex items-center justify-center transition-all shadow-lg shadow-blue-500/20 mt-4 group">
-                                    <Play className="w-4 h-4 mr-2 group-hover:animate-pulse fill-white" />
-                                    RE-RUN AGENT
+                                <button
+                                    onClick={handleReRun}
+                                    disabled={isReRunning || status === 'RUNNING'}
+                                    className="w-full bg-primary hover:bg-blue-600 disabled:bg-slate-700 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold text-sm flex items-center justify-center transition-all shadow-lg shadow-blue-500/20 mt-4 group"
+                                >
+                                    {isReRunning || status === 'RUNNING' ? (
+                                        <><RefreshCcw className="w-4 h-4 mr-2 animate-spin" /> RUNNING...</>
+                                    ) : (
+                                        <><Play className="w-4 h-4 mr-2 group-hover:animate-pulse fill-white" /> RE-RUN AGENT</>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -141,11 +161,12 @@ const ResultsDashboard = () => {
                                     <Activity className="w-5 h-5" />
                                     <h2 className="text-lg font-semibold text-white">Run Summary</h2>
                                 </div>
-                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase border ${status === 'PASSED' ? 'bg-accent-green/10 text-accent-green border-accent-green/20' :
-                                    status === 'FAILED' ? 'bg-accent-red/10 text-accent-red border-accent-red/20' :
-                                        'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase border ${effectiveStatus === 'PASSED' ? 'bg-accent-green/10 text-accent-green border-accent-green/20' :
+                                    effectiveStatus === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                        effectiveStatus === 'FAILED' ? 'bg-accent-red/10 text-accent-red border-accent-red/20' :
+                                            'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                     }`}>
-                                    {status === 'RUNNING' ? 'SCANNING' : (status === 'IDLE' ? 'WAITING' : status)}
+                                    {effectiveStatus === 'RUNNING' ? 'SCANNING' : effectiveStatus === 'IDLE' ? 'WAITING' : effectiveStatus === 'PARTIAL' ? 'PARTIAL FIX' : effectiveStatus}
                                 </span>
                             </div>
                             <div className="space-y-4">
@@ -160,6 +181,12 @@ const ResultsDashboard = () => {
                                         })()}
                                     </span>
                                 </div>
+                                {detectedEngines && (
+                                    <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                                        <span className="text-text-muted-dark text-sm">Tech Stack</span>
+                                        <span className="text-secondary-cyan font-mono font-bold text-sm">{detectedEngines}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between items-center border-b border-slate-800 pb-4">
                                     <span className="text-text-muted-dark text-sm">Iterations</span>
                                     <span className="text-accent-red font-mono font-bold text-lg">{iterations}</span>
@@ -170,8 +197,11 @@ const ResultsDashboard = () => {
                                 </div>
                                 <div className="flex justify-between items-center pt-1">
                                     <span className="text-text-muted-dark text-sm">Agent Status</span>
-                                    <div className="flex items-center text-primary font-bold text-sm tracking-wider uppercase">
-                                        {status === 'PASSED' ? 'COMPLETED' : status || 'SCANNING'}
+                                    <div className={`flex items-center font-bold text-sm tracking-wider uppercase ${effectiveStatus === 'PASSED' ? 'text-accent-green' :
+                                        effectiveStatus === 'PARTIAL' ? 'text-amber-400' :
+                                            effectiveStatus === 'FAILED' ? 'text-accent-red' : 'text-primary'
+                                        }`}>
+                                        {{ PASSED: 'COMPLETED', PARTIAL: 'PARTIAL FIX', FAILED: 'FAILED', RUNNING: 'SCANNING', IDLE: 'WAITING' }[effectiveStatus] || effectiveStatus || 'SCANNING'}
                                         <span className="relative flex h-2 w-2 ml-2">
                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                                             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
@@ -374,7 +404,7 @@ const ResultsDashboard = () => {
                     Agent ID: devai-v2.1-prod-0092 | Last sync: {new Date().toLocaleTimeString()} UTC
                 </footer>
             </main>
-        </div>
+        </div >
     );
 };
 
