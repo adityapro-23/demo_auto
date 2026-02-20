@@ -165,6 +165,30 @@ const Launchpad = () => {
                                 </button>
                                 {error && <p className="text-accent-red text-center text-sm">{error}</p>}
                             </form>
+
+                            {/* Test Repo Note */}
+                            <div className="mt-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                                <div className="flex items-start gap-3">
+                                    <span className="text-amber-400 text-lg mt-0.5">💡</span>
+                                    <div className="text-sm">
+                                        <p className="font-semibold text-amber-300 mb-1">Use this repo for testing:</p>
+                                        <a
+                                            href="https://github.com/VinayakGawade009/demo_test7"
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="font-mono text-xs text-amber-400 hover:text-amber-200 underline underline-offset-2 break-all transition-colors"
+                                        >
+                                            https://github.com/VinayakGawade009/demo_test7
+                                        </a>
+                                        <p className="text-amber-200/70 mt-2 leading-relaxed">
+                                            As per PS3 guidelines, the GitHub Access Token cannot be taken as user input.
+                                            It is pre-configured as a server-side environment variable, and is linked to the account
+                                            that owns the above repository. Please use this repo URL to run the agent successfully.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </main>
