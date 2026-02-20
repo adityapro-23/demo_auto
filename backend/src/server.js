@@ -10,7 +10,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({
     origin: process.env.FRONTEND_URL || '*', // Allow frontend URL or all for dev
     methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type']
+    allowedHeaders: ['Content-Type'],
+    credentials: true,
+    sameSite: 'lax',
+    httpOnly: true,
 }));
 app.use(express.json());
 
